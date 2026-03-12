@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>地下停车场电子地图（毕设版）</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://res.wx.qq.com/open/js/jweixin-1.6.0.js"></script>
+    <style>
+        * { margin: 0; padding: 0; }
+        #map { width: 100%; height: 100vh; background: #f5f5f5; }
+        .leaflet-popup-content-wrapper { border-radius: 8px; }
+        #saveBtn {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: #3388FF; color: white; padding: 10px 20px; border-radius: 30px;
+            border: none; font-size: 16px; z-index: 999; cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <button id="saveBtn">记录我的车位</button>
+
+    <script>
+        let selectedSlot = null;
+        let routeLine = null;
+
+        // 初始化地图（无图片，纯代码绘图）
+        const map = L.map('map', {
+            crs: L.CRS.Simple,
+            minZoom: -1,
+            maxZoom: 3,
+            zoom: 1,
+            center: [400, 400]
+        });
+
+        // 1. 纯代码绘制停车场轮廓（核心：不用图片也能显示）
+        // 停车场外框
+        L.polygon([[50,50], [750,50], [750,750], [50,750]], {
+            color: '#000', weight: 4, fillColor: '#e8e8e8', fillOpacity: 0.8
+        }).addTo(map);
+
+        // 通道（主路）
+        L.polyline([[50, 200], [750, 200], [750, 600], [50, 600]], {
+            color: '#fff', weight: 80, opacity: 1
+        }).addTo(map);
+
+        // 出入口标注
+        L.marker([400, 50], {
+            icon: L.divIcon({
+                html: '<div style="width:30px;height:30px;background:#3388FF;border-radius:50%;color:white;text-align:center;line-height:30px;font-size:14px;">入口</div>',
+                iconSize: [30, 30]
+            })
+        }).addTo(map).bindPopup('<h4>主入口</h4><p>天平路入口</p>');
+
+        // 2. 批量绘制车位（毕设演示用，直接复制即可）
+        const slots = [
+            // B1区车位（空闲/已占交替）
+            {id:1, x:100, y:250, name:'B1-001', status:'free'},
+            {id:2, x:180, y:250, name:'B1-002', status:'occupied'},
+            {id:3, x:260, y:250, name:'B1-003', status:'free'},
+            {id:4, x:340, y:250, name:'B1-004', status:'free'},
+            {id:5, x:420, y:250, name:'B1-005', status:'occupied'},
+            // 第二排车位
+            {id:6, x:100, y:320, name:'B1-006', status:'free'},
+            {id:7, x:180, y:320, name:'B1-007', status:'occupied'},
+            {id:8, x:260, y:320, name:'B1-008', status:'free'},
+            {id:9, x:340, y:320, name:'B1-009', status:'occupied'},
+            {id:10, x:420, y:320, name:'B1-010', status:'free'},
+        ];
+
+        // 渲染所有车位
+        slots.forEach(slot => {
+            // 车位背景（矩形）
+            L.rectangle([[slot.x-20, slot.y-15], [slot.x+20, slot.y+15]], {
+                color: slot.status === 'free' ? '#00C800' : '#FF3333',
+                weight: 2,
+                fillColor: slot.status === 'free' ? '#00C800' : '#FF3333',
+                fillOpacity: 0.3
+            }).addTo(map);
+
+            // 车位标记（文字）
+            L.marker([slot.x, slot.y], {
+                icon: L.divIcon({
+                    html: `<div style="color:white;font-size:12px;text-align:center;">${slot.name.split('-')[1]}</div>`,
+                    iconSize: [40, 30]
+                })
+            }).addTo(map).bindPopup(`
+                <div style="padding:5px;">
+                    <h4>${slot.name}</h4>
+                    <p style="color:${slot.status==='free'?'green':'red'}">状态：${slot.status==='free'?'空闲':'已占用'}</p>
+                </div>
+            `).on('click', () => {
+                selectedSlot = slot;
+                alert(`已选中车位：${slot.name}`);
+            });
+        });
+
+        // 3. 记录车位（传给小程序）
+        document.getElementById('saveBtn').addEventListener('click', () => {
+            if (!selectedSlot) { alert('请先点击选择车位！'); return; }
+            wx.miniProgram.postMessage({
+                data: {type:'saveSlot', slot: selectedSlot}
+            });
+            localStorage.setItem('parkSlot', JSON.stringify(selectedSlot));
+            alert(`已记录车位：${selectedSlot.name}`);
+        });
+
+        // 4. 接收小程序导航指令，绘制路线
+        window.addEventListener('message', (e) => {
+            if (e.data.type === 'navToSlot') {
+                const slot = JSON.parse(localStorage.getItem('parkSlot'));
+                if (!slot) { alert('未记录车位！'); return; }
+                if (routeLine) map.removeLayer(routeLine);
+                // 绘制从入口到车位的路线
+                routeLine = L.polyline([[400,50], [slot.x, slot.y]], {
+                    color: '#FF0000', weight: 6, dashArray: [10,5]
+                }).addTo(map);
+                map.fitBounds(routeLine.getBounds());
+                alert(`已规划到${slot.name}的路线！`);
+            }
+        });
+    </script>
+</body>
+</html>
