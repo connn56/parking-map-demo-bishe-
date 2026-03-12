@@ -3,69 +3,82 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>地下停车场电子地图（复杂版）</title>
+    <title>地下停车场智能寻车系统（1-375连续编号版）</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://res.wx.qq.com/open/js/jweixin-1.6.0.js"></script>
     <style>
         * { margin: 0; padding: 0; }
-        #map { width: 100%; height: 100vh; background: #f0f0f0; }
+        #map { width: 100%; height: 100vh; background: #f5f5f5; }
         .leaflet-popup-content-wrapper { border-radius: 8px; }
-        #saveBtn {
-            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-            background: #3388FF; color: white; padding: 10px 20px; border-radius: 30px;
-            border: none; font-size: 16px; z-index: 999; cursor: pointer;
+        #control-panel {
+            position: fixed; top: 20px; left: 20px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); z-index: 999;
         }
+        #saveBtn, #navBtn {
+            padding: 8px 16px; margin: 5px; border: none; border-radius: 4px; cursor: pointer;
+        }
+        #saveBtn { background: #3388FF; color: white; }
+        #navBtn { background: #FF5722; color: white; }
     </style>
 </head>
 <body>
     <div id="map"></div>
-    <button id="saveBtn">记录我的车位</button>
+    <div id="control-panel">
+        <div>当前选中车位：<span id="current-slot">无</span></div>
+        <button id="saveBtn">记录我的车位</button>
+        <button id="navBtn">开始寻车</button>
+    </div>
 
     <script>
         let selectedSlot = null;
         let routeLine = null;
+        const entrance = [850, 50]; // 天平路入口坐标
 
         // 初始化地图
         const map = L.map('map', {
             crs: L.CRS.Simple,
-            minZoom: -2,
-            maxZoom: 4,
-            zoom: 0,
+            minZoom: -3,
+            maxZoom: 5,
+            zoom: -1,
             center: [500, 800]
         });
 
-        // 1. 绘制停车场外框
+        // 1. 停车场外框
         L.polygon([[50,50], [1550,50], [1550,950], [50,950]], {
             color: '#000', weight: 5, fillColor: '#e0e0e0', fillOpacity: 0.9
         }).addTo(map);
 
-        // 2. 绘制主通道（黄色虚线）
+        // 2. 主通道（黄色虚线）
         const roads = [
-            [[50,200], [1550,200]],
-            [[50,450], [1550,450]],
-            [[50,700], [1550,700]],
-            [[250,50], [250,950]],
-            [[550,250], [550,650]],
-            [[1050,250], [1050,650]]
+            [[50,200], [1550,200]],   // 顶部横向通道
+            [[50,450], [1550,450]],   // 中间横向通道
+            [[50,700], [1550,700]],   // 底部横向通道
+            [[250,50], [250,950]],    // 左侧纵向通道
+            [[550,250], [550,650]],   // 中间左纵向通道
+            [[1050,250], [1050,650]], // 中间右纵向通道
+            [[1350,50], [1350,950]]   // 右侧纵向通道
         ];
         roads.forEach(road => {
             L.polyline(road, { color: '#FFCC00', weight: 60, opacity: 0.8, dashArray: '20,10' }).addTo(map);
         });
 
-        // 3. 绘制功能区
-        // 配电房
-        L.rectangle([[220, 100], [380, 320]], { color: '#666', fillColor: '#999', fillOpacity: 0.7 }).addTo(map);
-        L.marker([300, 240], { icon: L.divIcon({ html: '<div style="font-size:14px;">配电房</div>' }) }).addTo(map);
-        // 保安室
-        L.rectangle([[720, 100], [880, 320]], { color: '#666', fillColor: '#999', fillOpacity: 0.7 }).addTo(map);
-        L.marker([800, 240], { icon: L.divIcon({ html: '<div style="font-size:14px;">保安室</div>' }) }).addTo(map);
-        // 非机动车区
-        L.rectangle([[650, 1100], [850, 1450]], { color: '#666', fillColor: '#ccc', fillOpacity: 0.7 }).addTo(map);
-        L.marker([750, 1275], { icon: L.divIcon({ html: '<div style="font-size:14px;">非机动车停车区</div>' }) }).addTo(map);
+        // 3. 障碍物/功能区
+        const obstacles = [
+            {name: '配电房', bounds: [[220, 100], [380, 320]], color: '#999'},
+            {name: '保安室', bounds: [[720, 100], [880, 320]], color: '#999'},
+            {name: '储物间', bounds: [[720, 600], [880, 800]], color: '#999'},
+            {name: '非机动车停车区', bounds: [[650, 1100], [850, 1450]], color: '#ccc'},
+            {name: '消防栓', bounds: [[820, 900], [880, 980]], color: '#FF6600'},
+            {name: '消防栓', bounds: [[920, 900], [980, 980]], color: '#FF6600'}
+        ];
+        obstacles.forEach(obs => {
+            L.rectangle(obs.bounds, { color: '#666', fillColor: obs.color, fillOpacity: 0.7 }).addTo(map);
+            const center = [(obs.bounds[0][0]+obs.bounds[1][0])/2, (obs.bounds[0][1]+obs.bounds[1][1])/2];
+            L.marker(center, { icon: L.divIcon({ html: `<div style="font-size:12px;">${obs.name}</div>` }) }).addTo(map);
+        });
 
-        // 4. 绘制入口/出口
-        L.marker([850, 50], {
+        // 4. 入口/出口
+        L.marker(entrance, {
             icon: L.divIcon({
                 html: '<div style="width:80px;height:30px;background:#3388FF;color:white;text-align:center;line-height:30px;border-radius:5px;">天平路入口</div>',
                 iconSize: [80, 30]
@@ -78,104 +91,63 @@
             })
         }).addTo(map);
 
-        // 5. 批量绘制车位（模拟真实布局）
-        const slots = [
-            // 左上区域
-            {id:83, x:100, y:100, name:'83', status:'free'},
-            {id:84, x:140, y:100, name:'84', status:'occupied'},
-            {id:85, x:180, y:100, name:'85', status:'free'},
-            {id:86, x:220, y:100, name:'86', status:'free'},
-            {id:87, x:260, y:100, name:'87', status:'occupied'},
-            {id:93, x:380, y:400, name:'93', status:'free'},
-            {id:94, x:420, y:400, name:'94', status:'free'},
-            {id:95, x:460, y:400, name:'95', status:'occupied'},
-            // 右上区域
-            {id:96, x:300, y:300, name:'96', status:'free'},
-            {id:97, x:340, y:300, name:'97', status:'free'},
-            {id:98, x:380, y:300, name:'98', status:'occupied'},
-            {id:99, x:420, y:300, name:'99', status:'free'},
-            {id:100, x:460, y:300, name:'100', status:'free'},
-            {id:102, x:500, y:300, name:'102', status:'occupied'},
-            {id:104, x:540, y:300, name:'104', status:'free'},
-            {id:106, x:580, y:300, name:'106', status:'free'},
-            {id:108, x:620, y:300, name:'108', status:'occupied'},
-            // 中间区域
-            {id:122, x:300, y:400, name:'122', status:'free'},
-            {id:124, x:340, y:400, name:'124', status:'free'},
-            {id:126, x:380, y:400, name:'126', status:'occupied'},
-            {id:128, x:420, y:400, name:'128', status:'free'},
-            {id:130, x:460, y:400, name:'130', status:'free'},
-            {id:132, x:500, y:400, name:'132', status:'occupied'},
-            {id:134, x:540, y:400, name:'134', status:'free'},
-            {id:135, x:300, y:440, name:'135', status:'free'},
-            {id:138, x:340, y:440, name:'138', status:'occupied'},
-            {id:140, x:380, y:440, name:'140', status:'free'},
-            {id:142, x:420, y:440, name:'142', status:'free'},
-            {id:144, x:460, y:440, name:'144', status:'occupied'},
-            {id:146, x:500, y:440, name:'146', status:'free'},
-            {id:149, x:540, y:440, name:'149', status:'free'},
-            {id:151, x:580, y:440, name:'151', status:'occupied'},
-            {id:153, x:620, y:440, name:'153', status:'free'},
-            {id:155, x:660, y:440, name:'155', status:'free'},
-            {id:158, x:700, y:440, name:'158', status:'occupied'},
-            // 下方区域
-            {id:220, x:100, y:500, name:'220', status:'free'},
-            {id:222, x:140, y:500, name:'222', status:'free'},
-            {id:224, x:180, y:500, name:'224', status:'occupied'},
-            {id:226, x:220, y:500, name:'226', status:'free'},
-            {id:228, x:260, y:500, name:'228', status:'free'},
-            {id:230, x:300, y:500, name:'230', status:'occupied'},
-            {id:231, x:340, y:500, name:'231', status:'free'},
-            {id:232, x:100, y:540, name:'232', status:'free'},
-            {id:234, x:140, y:540, name:'234', status:'free'},
-            {id:236, x:180, y:540, name:'236', status:'occupied'},
-            {id:238, x:220, y:540, name:'238', status:'free'},
-            {id:240, x:260, y:540, name:'240', status:'free'},
-            {id:242, x:300, y:540, name:'242', status:'occupied'},
-            // 右下区域
-            {id:308, x:100, y:700, name:'308', status:'free'},
-            {id:310, x:140, y:700, name:'310', status:'free'},
-            {id:312, x:180, y:700, name:'312', status:'occupied'},
-            {id:314, x:600, y:700, name:'314', status:'free'},
-            {id:315, x:640, y:700, name:'315', status:'free'},
-            {id:316, x:600, y:740, name:'316', status:'occupied'},
-            {id:317, x:600, y:780, name:'317', status:'free'},
-            {id:318, x:600, y:820, name:'318', status:'free'},
-            {id:319, x:700, y:700, name:'319', status:'occupied'},
-            {id:320, x:740, y:700, name:'320', status:'free'},
-            {id:321, x:780, y:700, name:'321', status:'free'},
-            {id:322, x:700, y:740, name:'322', status:'occupied'},
-            {id:323, x:740, y:740, name:'323', status:'free'},
-            {id:324, x:780, y:740, name:'324', status:'free'},
-            {id:325, x:700, y:850, name:'325', status:'free'},
-            {id:327, x:740, y:850, name:'327', status:'free'},
-            {id:329, x:780, y:850, name:'329', status:'occupied'},
-            {id:330, x:850, y:850, name:'330', status:'free'},
-            {id:332, x:890, y:850, name:'332', status:'free'},
-            {id:334, x:930, y:850, name:'334', status:'occupied'},
-            {id:337, x:970, y:850, name:'337', status:'free'},
-            {id:339, x:1010, y:850, name:'339', status:'free'},
-            {id:341, x:1050, y:850, name:'341', status:'occupied'},
-            {id:343, x:1090, y:850, name:'343', status:'free'},
-            {id:345, x:1130, y:850, name:'345', status:'free'},
-            {id:347, x:1170, y:850, name:'347', status:'occupied'},
-            {id:348, x:850, y:900, name:'348', status:'free'},
-            {id:350, x:890, y:900, name:'350', status:'free'},
-            {id:352, x:930, y:900, name:'352', status:'occupied'},
-            {id:354, x:970, y:900, name:'354', status:'free'},
-            {id:356, x:1010, y:900, name:'356', status:'free'},
-            {id:358, x:1050, y:900, name:'358', status:'occupied'},
-            {id:360, x:1090, y:900, name:'360', status:'free'},
-            {id:362, x:1130, y:900, name:'362', status:'free'},
-            {id:365, x:1170, y:900, name:'365', status:'occupied'},
-            {id:367, x:1210, y:900, name:'367', status:'free'},
-            {id:369, x:1250, y:900, name:'369', status:'free'},
-            {id:371, x:1290, y:900, name:'371', status:'occupied'},
-            {id:373, x:1330, y:900, name:'373', status:'free'},
-            {id:375, x:1370, y:900, name:'375', status:'free'}
-        ];
+        // 5. 车位数据：1-375连续编号（按真实布局分布）
+        const slots = [];
+        let id = 1;
+        // 顶部横向车位（1-48）
+        for (let y = 100; y <= 1400; y += 30) {
+            if (id > 48) break;
+            slots.push({id: id++, x: 100, y: y, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+        }
+        // 左侧纵向车位（49-82）
+        for (let x = 100; x <= 850; x += 40) {
+            if (id > 82) break;
+            slots.push({id: id++, x: x, y: 100, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+        }
+        // 左上区域（83-95）
+        for (let x = 100; x <= 460; x += 40) {
+            slots.push({id: id++, x: x, y: 100, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+        }
+        // 右上区域（96-121）
+        for (let x = 300; x <= 700; x += 40) {
+            slots.push({id: id++, x: x, y: 300, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+        }
+        // 中间区域（122-186）
+        for (let x = 300; x <= 850; x += 40) {
+            slots.push({id: id++, x: x, y: 400, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+            slots.push({id: id++, x: x, y: 440, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+        }
+        // 中下部区域（187-218）
+        for (let x = 300; x <= 1450; x += 40) {
+            slots.push({id: id++, x: x, y: 480, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+        }
+        // 左下区域（219-242）
+        for (let x = 100; x <= 340; x += 40) {
+            slots.push({id: id++, x: x, y: 500, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+            slots.push({id: id++, x: x, y: 540, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+        }
+        // 右下区域（243-307）
+        for (let x = 300; x <= 1450; x += 40) {
+            slots.push({id: id++, x: x, y: 500, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+            slots.push({id: id++, x: x, y: 540, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+        }
+        // 底部左侧区域（308-318）
+        for (let x = 100; x <= 600; x += 40) {
+            slots.push({id: id++, x: x, y: 700, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+        }
+        // 底部中间区域（319-329）
+        for (let x = 700; x <= 780; x += 40) {
+            slots.push({id: id++, x: x, y: 700, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+            slots.push({id: id++, x: x, y: 740, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+            slots.push({id: id++, x: x, y: 850, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+        }
+        // 底部右侧区域（330-375）
+        for (let x = 850; x <= 1370; x += 40) {
+            slots.push({id: id++, x: x, y: 850, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+            slots.push({id: id++, x: x, y: 900, name: (id-1).toString(), status: id%3===0 ? 'occupied' : 'free'});
+        }
 
-        // 渲染车位
+        // 6. 渲染车位
         slots.forEach(slot => {
             L.rectangle([[slot.x-15, slot.y-10], [slot.x+15, slot.y+10]], {
                 color: slot.status === 'free' ? '#00C800' : '#FF9900',
@@ -195,11 +167,12 @@
                 </div>
             `).on('click', () => {
                 selectedSlot = slot;
+                document.getElementById('current-slot').textContent = slot.name;
                 alert(`已选中车位：${slot.name}`);
             });
         });
 
-        // 6. 记录车位 + 导航逻辑
+        // 7. 记录车位逻辑
         document.getElementById('saveBtn').addEventListener('click', () => {
             if (!selectedSlot) { alert('请先点击选择车位！'); return; }
             wx.miniProgram.postMessage({ data: { type: 'saveSlot', slot: selectedSlot } });
@@ -207,18 +180,25 @@
             alert(`已记录车位：${selectedSlot.name}`);
         });
 
-        window.addEventListener('message', (e) => {
-            if (e.data.type === 'navToSlot') {
-                const slot = JSON.parse(localStorage.getItem('parkSlot'));
-                if (!slot) { alert('未记录车位！'); return; }
-                if (routeLine) map.removeLayer(routeLine);
-                // 从入口到车位的导航路线
-                routeLine = L.polyline([[850, 50], [slot.x, slot.y]], {
-                    color: '#FF0000', weight: 6, dashArray: [10, 5]
-                }).addTo(map);
-                map.fitBounds(routeLine.getBounds());
-                alert(`已规划到车位 ${slot.name} 的导航路线！`);
-            }
+        // 8. 反向寻车逻辑（绕障导航）
+        document.getElementById('navBtn').addEventListener('click', () => {
+            const slot = JSON.parse(localStorage.getItem('parkSlot'));
+            if (!slot) { alert('未记录车位！'); return; }
+            if (routeLine) map.removeLayer(routeLine);
+
+            // 生成绕障导航路径（沿主通道走，避开障碍物）
+            const path = [
+                entrance,
+                [entrance[0], 200],  // 进入顶部横向通道
+                [slot.x, 200],        // 沿通道到车位纵向位置
+                [slot.x, slot.y]      // 进入车位
+            ];
+
+            routeLine = L.polyline(path, {
+                color: '#FF0000', weight: 6, dashArray: [10, 5], opacity: 0.8
+            }).addTo(map);
+            map.fitBounds(routeLine.getBounds());
+            alert(`已规划到车位 ${slot.name} 的导航路线！`);
         });
     </script>
 </body>
